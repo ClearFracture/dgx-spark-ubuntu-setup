@@ -1,30 +1,66 @@
 DGX SPARK / STOCK UBUNTU 24.04 ARM64 / NVIDIA STACK / VLLM
-Reviewed against NVIDIA documentation on 2026-09-27.
+Reviewed against NVIDIA documentation on 2026-09-28.
 
 The scripts require network access to approved Ubuntu, NVIDIA, Docker, and
 Hugging Face endpoints. They do not contain the OS installer, packages,
 container image, model weights, or credentials. Do not store secrets on this USB.
 
-On the Spark's Ubuntu Server terminal, the USB may auto-mount at
-/media/$USER/DGXSETUP. If it does not, mount it by its DGXSETUP label.
-Copy this folder to your home directory, then unmount it. Run the scripts
-from the copy. The USB filesystem does not provide Linux executable bits.
+After Ubuntu is installed, place the six shell scripts from this repository in
+$HOME/dgx-spark-setup. The repository files are not the bootable Ubuntu
+installer. Choose one transfer method:
+
+GitHub, if approved network access and Git are available on the Spark:
+
+  git clone https://github.com/ClearFracture/dgx-spark-ubuntu-setup.git "$HOME/dgx-spark-source"
+  mkdir -p "$HOME/dgx-spark-setup"
+  cp -a "$HOME/dgx-spark-source/scripts/." "$HOME/dgx-spark-setup/"
+
+Data USB, after copying this repository's scripts directory to a USB labeled
+DGXSETUP on another computer. Use a separate USB or reformat the installer
+USB after Ubuntu is installed; formatting erases the installer image. Run
+scripts with `bash` because data USB filesystems may not preserve executable
+bits.
 
   lsblk -f
-  sudo mkdir -p /mnt/dgxsetup
-  sudo mount -L DGXSETUP /mnt/dgxsetup  # Skip if already mounted under /media/$USER/DGXSETUP
-  cp -a /mnt/dgxsetup/dgx-spark-setup "$HOME/"  # Use /media/$USER/DGXSETUP if auto-mounted
-  sudo umount /mnt/dgxsetup  # Skip if auto-mounted
+  usb_root="/media/$USER/DGXSETUP"
+  if [[ ! -d "$usb_root/scripts" ]]; then
+    sudo mkdir -p /mnt/dgxsetup
+    sudo mount -L DGXSETUP /mnt/dgxsetup
+    usb_root=/mnt/dgxsetup
+  fi
+  mkdir -p "$HOME/dgx-spark-setup"
+  cp -a "$usb_root/scripts/." "$HOME/dgx-spark-setup/"
+  if [[ "$usb_root" == /mnt/dgxsetup ]]; then sudo umount /mnt/dgxsetup; fi
+
+If Git is missing and the client permits installing it, run
+`sudo apt-get update && sudo apt-get install -y git` before cloning. If
+mounting fails, check the USB label and mount point with `lsblk -f`.
+
   cd "$HOME/dgx-spark-setup"
 
-If mounting fails, check that the USB is present with: lsblk -f
-
-Run in this order, as your regular login user (not a root shell):
+Run the base and driver stages as your regular login user (not a root shell):
 
   bash 01-dgx-base.sh
   sudo reboot
   cd "$HOME/dgx-spark-setup" && bash 02-gpu-driver.sh
   sudo reboot
+
+Before Docker and model downloads, inspect the root filesystem and LVM layout:
+
+  lsblk -f
+  df -hT /
+  sudo lvs
+
+On the lab Spark, Ubuntu allocated only 100 GiB to / on a 4 TB LVM
+partition. If the client wants the whole volume group for /, and the LV
+name and ext4 filesystem match, expand it before pulling model weights:
+
+  sudo lvextend -l +100%FREE -r /dev/ubuntu-vg/ubuntu-lv
+  df -hT /
+
+Do not use that LV path without checking the new system's layout and
+client storage policy. Continue with Docker and vLLM:
+
   cd "$HOME/dgx-spark-setup" && bash 03-docker-gpu.sh
   bash 04-nemotron-vllm.sh
   sudo docker logs -f nemotron-lightning
@@ -41,15 +77,6 @@ The Tailscale installer does not contain login credentials. If the first
 login URL fails and the host remains in NeedsLogin, stop the waiting command
 with Ctrl+C and run `sudo tailscale up --force-reauth` for a fresh URL.
 See the full runbook for account provisioning and STIG assessment steps.
-
-If Ubuntu allocated only 100 GiB to / on a 4 TB LVM partition, inspect
-`lsblk` and `df -hT /`. If the client wants the whole LVM volume group for
-the root filesystem, expand it before pulling model weights:
-
-  sudo lvextend -l +100%FREE -r /dev/ubuntu-vg/ubuntu-lv
-  df -hT /
-
-Check the LV name and client storage policy before using that command.
 
 Use Ctrl+C to leave docker logs; that does not stop the container.
 The model API listens on 127.0.0.1:8000 only.

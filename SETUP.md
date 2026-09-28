@@ -1,12 +1,14 @@
 # DGX Spark: Ubuntu 24.04, Docker, vLLM, and Nemotron 3.5 Lightning
 
-Checked against Canonical and NVIDIA documentation on 2026-09-27. This runbook is for installing **Canonical Ubuntu 24.04 ARM64 Server first**, then NVIDIA's DGX software stack, Docker, and vLLM on an NVIDIA DGX Spark (GB10). It assumes an approved network connection to Ubuntu/NVIDIA repositories. For a disconnected client network, arrange an approved mirror and container/model transfer using NVIDIA's [air-gapped guidance](https://docs.nvidia.com/dgx/dgx-os-7-user-guide/appendix_e_air_gapped_installations.html).
+Checked against Canonical and NVIDIA documentation on 2026-09-28. This runbook is for installing **Canonical Ubuntu 24.04 ARM64 Server first**, then NVIDIA's DGX software stack, Docker, and vLLM on an NVIDIA DGX Spark (GB10). It assumes an approved network connection to Ubuntu/NVIDIA repositories. For a disconnected client network, arrange an approved mirror and container/model transfer using NVIDIA's [air-gapped guidance](https://docs.nvidia.com/dgx/dgx-os-7-user-guide/appendix_e_air_gapped_installations.html).
 
-**Local validation completed.** The Ubuntu `24.04.5` ARM64 Server ISO came from [Canonical's release directory](https://cdimages.ubuntu.com/ubuntu/releases/24.04/release/), SHA-256 `f12484464c7d4d73e2167e0a7dbda1e669f8fae9bcf778dc0944937034b320cb` (matching [Canonical's SHA256SUMS](https://cdimage.ubuntu.com/ubuntu/releases/24.04/release/SHA256SUMS)). The Spark failed to find the live filesystem with the default GRUB entry; selecting **Ubuntu Server with the HWE kernel** allowed the stock Ubuntu install. The DGX stack, Docker GPU test, and Nemotron vLLM sample completion then succeeded. The numbered scripts are in [scripts](scripts/README.txt) and were copied to the Spark's home directory.
+**Local validation completed.** The `ubuntu-24.04.5-live-server-arm64.iso` image came from [Canonical's release directory](https://cdimages.ubuntu.com/ubuntu/releases/24.04/release/), SHA-256 `f12484464c7d4d73e2167e0a7dbda1e669f8fae9bcf778dc0944937034b320cb` (matching [Canonical's SHA256SUMS](https://cdimage.ubuntu.com/ubuntu/releases/24.04/release/SHA256SUMS)). The Spark failed to find the live filesystem with the default GRUB entry; selecting **Ubuntu Server with the HWE kernel** allowed the stock Ubuntu install. The DGX stack, Docker GPU test, and Nemotron vLLM sample completion then succeeded. The numbered scripts are in [scripts](scripts/README.txt) and were copied to the Spark's home directory.
 
 NVIDIA's [custom Ubuntu + DGX stack guide](https://docs.nvidia.com/dgx/dgx-os-7-user-guide/installing_on_ubuntu.html) describes this installation sequence and lists Spark-specific packages. Its generic prerequisites say Ubuntu 24.04 and kernel 6.8, while recent Spark releases use an NVIDIA kernel. If the installer cannot boot, see the internal SSD, or access a network, stop before changing partitions and check the exact image/kernel path with NVIDIA support. The client's compliance team must assess the final configuration against its actual controls; installing Ubuntu by itself does not prove FIPS, STIG, or other compliance.
 
 ## 1. Boot and install Ubuntu from confirmed compatible media
+
+Download the ARM64 **live-server** ISO named above and compare its SHA-256 with Canonical's `SHA256SUMS`. Write the ISO as a bootable image to a USB drive using an [image writer](https://ubuntu.com/desktop/docs/en/latest/how-to/create-a-bootable-usb-stick/); copying the ISO as an ordinary file does not create the installer. This erases the USB. After Ubuntu is installed, transfer this repository's `scripts/` directory on a separate data USB, by Git clone, or by reformatting and reusing the installer USB. See [script transfer instructions](scripts/README.txt).
 
 1. Back up data on the Spark. The Ubuntu install can erase the internal SSD. Disconnect other external storage, insert this USB, and connect a wired keyboard and display directly to the Spark.
 2. Power on and press **Esc** or **Del** immediately for UEFI. Under **Save & Exit → Boot Override**, select the USB for a one-time boot. NVIDIA documents this [USB boot path](https://docs.nvidia.com/dgx/dgx-spark/uefi-settings.html#boot-from-a-usb-device). In the Ubuntu GRUB menu, press **Down once** to select **Ubuntu Server with the HWE kernel**, then press **Enter**. The default **Try or Install Ubuntu Server** entry already failed to locate the live filesystem on this Spark. If HWE also fails, stop before changing the internal SSD and report the error.
@@ -21,6 +23,8 @@ Follow the Spark-relevant sections of NVIDIA's [custom installation guide](https
 # On the newly installed Ubuntu ARM64 system; requires approved repository access.
 test "$(dpkg --print-architecture)" = arm64
 grep -q 'VERSION_ID="24.04"' /etc/os-release
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
 curl -fsSL https://repo.download.nvidia.com/baseos/ubuntu/noble/arm64/dgx-repo-files.tgz -o /tmp/dgx-repo-files.tgz
 sudo tar xzf /tmp/dgx-repo-files.tgz -C /
 # On 2026-09-27 the archive pointed Noble at an HTTP 404 /baseos/8/ path.
@@ -75,7 +79,11 @@ nvidia-smi
 df -hT /
 ```
 
-Expected: Ubuntu 24.04, `aarch64`/`arm64`, an `-nvidia` kernel, an NVIDIA GB10 visible in `nvidia-smi`, and the approved root filesystem size. Record OS, kernel, driver, and firmware versions. NVIDIA's Spark update guide targets DGX OS; check its applicability before using it on a customized Ubuntu installation.
+Expected: Ubuntu 24.04, `aarch64`/`arm64`, an `-nvidia` kernel, an NVIDIA GB10 visible in `nvidia-smi`, and the approved root filesystem size. Record OS, kernel, driver, and firmware versions.
+
+Before Docker and model downloads, run `lsblk -f`, `df -hT /`, and `sudo lvs`. The local installer left `/` at 100 GiB despite a larger LVM partition. If the client approves using all free extents for `/`, and the LV path and filesystem match the local example, run `sudo lvextend -l +100%FREE -r /dev/ubuntu-vg/ubuntu-lv`, then verify `df -hT /`. Do not assume that LV path or storage policy on another machine.
+
+NVIDIA's Spark update guide targets DGX OS; check its applicability before using it on a customized Ubuntu installation.
 
 ## 4. Install/verify Docker GPU access
 
